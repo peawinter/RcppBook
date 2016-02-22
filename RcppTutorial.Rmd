@@ -1,9 +1,0 @@
----
-title: "Rcpp Tutorial"
-author: "Wenyu Wang"
-date: "February 19, 2016"
-output: html_document
----
-
-## Chapter 1. Introduction
-

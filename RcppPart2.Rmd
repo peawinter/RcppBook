@@ -1,0 +1,211 @@
+---
+title: "Rcpp Part 2"
+author: "Wenyu Wang"
+date: "February 22, 2016"
+output: html_document
+---
+
+```{r init, echo=FALSE}
+library(Rcpp)
+library(inline)
+```
+
+## Chapter 3. Data Structures
+
+**RObject** is at the heart of Rcpp. 
+
+Two core vector types "NumericVector" and "IntegerVector".
+
+An instance of the RObject class encapsulates an R object. Every R object itself is internally represented by a SEXP: a pointer to a so-called S expression object.
+
+### Integer vector class
+
+```{r returnPerfectNumber}
+src <- '
+Rcpp::IntegerVector epn(4);
+epn[0] = 6;
+epn[1] = 14;
+epn[2] = 496;
+epn[3] = 8182;
+return epn;
+'
+
+fun <- cxxfunction(signature(), src, plugin="Rcpp")
+fun()
+```
+
+```{r useInput}
+src <- '
+Rcpp::IntegerVector vec(vx);
+int prod = 1;
+for (int i = 0; i < vec.size(); i++) {
+  prod *= vec[i];
+}
+return Rcpp::wrap(prod);
+'
+
+fun <- cxxfunction(signature(vx = "integer"), src,
+                   plugin="Rcpp")
+fun(1:10)
+```
+
+Only the pointer to the underlying data is copied.
+
+```{r useInput2}
+src <- '
+Rcpp::IntegerVector vec(vx);
+int prod = std::accumulate(vec.begin(), vec.end(), 
+                           1, std::multiplies<int>());
+return Rcpp::wrap(prod);
+'
+fun <- cxxfunction(signature(vx = "integer"), src,
+                   plugin = "Rcpp")
+fun(1:10)
+```
+
+### Numeric vector class
+
+```{r sumOfPower}
+src <- '
+Rcpp::NumericVector vec(vx);
+double p = Rcpp::as<double>(dd);
+double sum = 0.0;
+for (int i = 0; i < vec.size(); i++) {
+  sum += pow(vec[i], p);
+}
+return Rcpp::wrap(sum);
+'
+
+fun <- cxxfunction(signature(vx = "numeric", dd = "numeric"), src,
+                   plugin = "Rcpp")
+fun(1:4, 2.2)
+```
+
+```{r introduceClone}
+src <- '
+Rcpp::NumericVector invec(vx);
+Rcpp::NumericVector outvec(vx);
+for (int i = 0; i < invec.size(); i++){
+  outvec[i] = log(invec[i]);
+}
+return outvec;
+'
+
+fun <- cxxfunction(signature(vx = "numeric"), src,
+                   plugin = "Rcpp")
+x <- c(1, 10, 100, 1000)
+cbind(x, fun(x))
+```
+
+C++ object contains a pointer to the underlying SEXP object from R.
+
+```{r introduceClone2}
+src <- '
+Rcpp::NumericVector invec(vx);
+Rcpp::NumericVector outvec = Rcpp::clone(vx);
+for (int i = 0; i < invec.size(); i++){
+  outvec[i] = log(invec[i]);
+}
+return outvec;
+'
+
+fun <- cxxfunction(signature(vx = "numeric"), src,
+                   plugin = "Rcpp")
+x <- c(1, 10, 100, 1000)
+cbind(x, fun(x))
+```
+
+This is better. Clone allocates memory for a new object.
+
+```{r introduceClone3}
+src <- '
+Rcpp::NumericVector invec(vx);
+Rcpp::NumericVector outvec = log(vx);
+return outvec;
+'
+
+fun <- cxxfunction(signature(vx = "numeric"), src,
+                   plugin = "Rcpp")
+x <- c(1, 10, 100, 1000)
+cbind(x, fun(x))
+```
+
+### Matrix
+
+```{r matrix}
+src <- '
+Rcpp::NumericMatrix mat = 
+  Rcpp::clone<Rcpp::NumericMatrix>(mx);
+std::transform(mat.begin(), mat.end(), 
+  mat.begin(), ::sqrt);
+return mat;
+'
+fun <- cxxfunction(signature(mx = "numeric"), src,
+                   plugin = "Rcpp")
+mx <- matrix(1:9, nrow = 3)
+fun(mx)
+```
+
+### Logical vector
+
+```{r logicalvector}
+fun <- cxxfunction(signature(), plugin="Rcpp",
+                   body = '
+Rcpp::LogicalVector v(6);
+v[0] = v[1] = false;
+v[2] = true;
+v[3] = R_NaN;
+v[4] = R_PosInf;
+v[5] = NA_REAL;
+return v;
+                   ')
+fun()
+identical(fun(), c(F, F, T, NA, NA, NA))
+```
+
+## Chapter 4. Data structures
+
+```{r someVec}
+someVec <- c(mean=1.1, dim=10, cnt=10)
+someVec
+names(someVec)
+```
+
+Do the same thing in Rcpp.
+
+```{r someVecRcpp}
+src <- '
+Rcpp::NumericVector x =
+  Rcpp::NumericVector::create(
+    Rcpp::Named("mean") = 1.1,
+    Rcpp::Named("var") = 10,
+    Rcpp::Named("cnt") = 20
+  );
+return x;
+'
+
+fun <- cxxfunction(signature(), src, plugin="Rcpp")
+fun()
+```
+
+A much more concise version, 
+1. using namespace Rcpp. 
+2. _["key"] shortcut.
+
+```{r someVecRcpp2}
+src <- '
+NumericVector x =
+  NumericVector::create(
+    _["mean"] = 1.1,
+    _["var"] = 10,
+    _["cnt"] = 20
+  );
+return x;
+'
+
+fun <- cxxfunction(signature(), src, plugin = "Rcpp")
+fun()
+```
+
+### Generic vector class / List
+

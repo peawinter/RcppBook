@@ -1,0 +1,348 @@
+---
+title: "Rcpp Part 1"
+author: "Wenyu Wang"
+date: "February 19, 2016"
+output: html_document
+---
+
+## Chapter 1. Introduction
+
+```{r loadpackage}
+library(plyr)
+library(inline)
+library(RcppArmadillo)
+library(RcppGSL)
+```
+
+```{r plot1}
+xx <- faithful$eruptions
+fit1 <- density(xx)
+fit2 <- replicate(10000, 
+                  {
+                    x <- sample(xx, replace = T);
+                    density(x, from=min(fit1$x), to=max(fit1$x))$y
+                  })
+fit3 <- apply(fit2, 1, quantile, c(0.025, 0.975))
+plot(fit1, ylim = range(fit3))
+polygon(c(fit1$x, rev(fit1$x)),
+        c(fit3[1,], rev(fit3[2,])),
+        col='grey', border=F)
+lines(fit1)
+```
+
+## Implement Fibonacci number 
+
+### A naive implementation
+
+*Using R*
+
+```{r fibR}
+fibR <- function(n) {
+  if (n %in% c(0, 1)) {
+    return(n)
+  }
+  fibR(n - 1) + fibR(n - 2)
+}
+```
+
+*Using pure C*
+
+```{r fibC, engine='Rcpp'}
+#include <Rcpp.h>
+// [[Rcpp::export]]
+int fibC(const int n) {
+  if (n == 0 || n == 1) return n;
+  return fibC(n - 1) + fibC(n - 2);
+}
+```
+
+*Using Inline*
+
+```{r fib_inline}
+# A pure C/C++ function as the generated function 
+incltxt <- '
+#include <Rcpp.h>
+// [[Rcpp::export]]
+int fibC(const int n) {
+  if (n == 0 || n == 1) return n;
+  return fibC(n - 1) + fibC(n - 2);
+}
+'
+fibCinline <- cxxfunction(signature(xs = 'int'), 
+                       plugin='Rcpp', 
+                       incl = incltxt,
+                       body='
+  int x = Rcpp::as<int>(xs);
+  return Rcpp::wrap( fibC(x) );
+')
+```
+
+### Another solution 
+
+```{r fibR2}
+fibR2 <- function(n) {
+  if (n <= 1) {
+    return(n)
+  }
+  if (n == 2) {
+    return(1)
+  }
+  output <- rep(1, n)
+  for (i in 3:n){
+    output[i] <- output[i-2] + output[i-1]
+  }
+  return(output[n])
+}
+```
+
+```{r fibR2_v2}
+# A more concise implementation
+fibR2_v2 <- local(
+  {
+    memo <- c(1, 1, rep(NA, 1000))
+    f <- function(x) {
+      if (x == 0) return(0)
+      if (x < 0) return(NA)
+      if (x > length(memo)) stop("x is too big.")
+      if (!is.na(memo[x])) return(memo[x])
+      ans <- f(x - 1) + f(x - 2)
+      memo[x] <<- ans
+      return(ans)
+    }
+  }
+)
+```
+
+*Using inline Cpp*
+
+```{r fib_inline2}
+incltxt2 <- '
+#include <Rcpp.h>
+#include <algorithm>
+#include <vector>
+#include <stdexcept>
+#include <cmath>
+#include <iostream>
+// [Rcpp::export]
+class Fib{
+public:
+  Fib(unsigned int n = 1000) {
+    memo.resize(n);
+    std::fill( memo.begin(), memo.end(), NAN );
+    memo[0] = 0.0;
+    memo[1] = 1.0;
+  }
+  
+  double fibonacci(int x) {
+    if (x < 0)
+      return ( (double) NAN );
+    if ( x >= (int) memo.size())
+      throw std::range_error(\"x too large for implementation\");
+    if (! ::isnan(memo[x]))
+      return (memo[x]);
+    memo[x] = fibonacci(x - 2) + fibonacci(x - 1);
+    return( memo[x] );
+  }
+private:
+  std::vector< double > memo;
+};
+'
+
+fibCinline2 <- cxxfunction(signature(xs = "int"), 
+                        plugin = "Rcpp",
+                        includes = incltxt2,
+                        body=
+'
+int x = Rcpp::as<int>(xs);
+Fib f;
+return Rcpp::wrap( f.fibonacci(x));
+')
+```
+
+### Third implementation
+
+*Using R*
+
+```{r fibR3}
+fibR3 <- function(n) {
+  if (n <= 1) {
+    return(n)
+  }
+  if (n == 2){
+    return(1)
+  }
+  cnt1 <- 1
+  cnt2 <- 1
+  for (i in 3:n) {
+    cnt3 <- cnt1 + cnt2
+    cnt1 <- cnt2
+    cnt2 <- cnt3
+  }
+  return(cnt3)
+}
+```
+
+```{r fibCinline3}
+incltxt3 <- 
+'
+#include <Rcpp.h>
+
+int fibC(const int n) {
+  if (n <= 1) return n;
+  if (n == 2) return 1;
+  int cnt1 = 1;
+  int cnt2 = 1;
+  int cnt3 = 0;
+  for (int i=2; i<n; i++) {
+    cnt3 = cnt2 + cnt1;
+    cnt1 = cnt2;
+    cnt2 = cnt3;
+  }
+  return cnt3;
+}
+'
+fibCinline3 <- cxxfunction(signature(xs="int"),
+                           plugin="Rcpp",
+                           includes = incltxt3,
+                           body = '
+int x = Rcpp::as<int>(xs);
+return Rcpp::wrap( fibC(x) );')
+```
+
+```{r fibR_test}
+system.time(fibR(20))
+system.time(fibR2(20))
+system.time(fibR3(20))
+# inline Rcpp
+system.time(fibCinline(20L))
+system.time(fibCinline2(20L))
+system.time(fibCinline3(20L))
+system.time(fibC(20))
+```
+
+## Second example 
+
+```{r VARr}
+a <- matrix(c(0.5, 0.1, 1.0, 0.5), nrow = 2)
+u <- matrix(rnorm(10000), ncol = 2)
+
+rSim <- function(coeff, errors) {
+  simdata <- matrix(0, nrow(errors), ncol(errors))
+  for (row in 2:nrow(errors)) {
+    simdata[row, ] = coeff %*% simdata[(row - 1), ] + errors[row, ]
+  }
+  return(simdata)
+}
+```
+
+```{r engine="Rcpp"}
+#include <RcppArmadillo.h>
+// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::export]]
+arma::mat rcppSim(arma::mat coeff, arma::mat errors) {
+   int m = errors.n_rows;
+   int n = errors.n_cols;
+   arma::mat simdata(m,n);
+   simdata.row(0) = arma::zeros<arma::mat>(1, n);
+   for (int row=1; row < m; row++) {
+     simdata.row(row) = simdata.row(row-1)*trans(coeff) + errors.row(row);
+   }
+   return simdata;
+}
+```
+
+```{r VARcpp}
+system.time(rData <- rSim(a, u))
+system.time(rcppData <- rcppSim(a, u))
+stopifnot(all.equal(rData, rcppData))
+```
+
+### Convolution
+
+```{r convolution_inline}
+incltxt5 <- '
+Rcpp::NumericVector xa(a);
+Rcpp::NumericVector xb(b);
+int n_xa = xa.size(), n_xb = xb.size();
+
+Rcpp::NumericVector xab(n_xa + n_xb - 1);
+for (int i = 0; i < n_xa; i++ )
+  for (int j = 0; j < n_xb; j ++ )
+    xab[i + j] += xa[i] * xb[j];
+return xab;
+'
+convolution <- cxxfunction(signature(a="numeric", b="numeric"), 
+                           incltxt5, plugin="Rcpp")
+convolution(1:4, 2:5)
+```
+
+```{r}
+inc <- '
+template <typename T>
+class square : public std::unary_function<T, T> {
+public:
+  T operator() (T t) const {return t*t ;}
+};
+'
+src <- '
+double x = Rcpp::as<double>(xs);
+int i = Rcpp::as<int>(is);
+square<double> sqdbl;
+square<int> sqint;
+Rcpp::DataFrame df = 
+  Rcpp::DataFrame::create(Rcpp::Named("x", sqdbl(x)),
+                          Rcpp::Named("i", sqint(i)));
+return df;
+'
+
+fun <- cxxfunction(signature(xs = "numeric", is = "integer"),
+                   body=src, include=inc, plugin="Rcpp")
+fun(2.2, 3L)
+```
+
+### Using plugins
+
+```{r usingPlugins}
+src <- '
+Rcpp::NumericVector yr(ys);
+Rcpp::NumericMatrix Xr(Xs);
+int n = Xr.nrow(), k = Xr.ncol();
+
+arma::mat    X(Xr.begin(), n, k, false);
+arma::colvec y(yr.begin(), yr.size(), false);
+
+arma::colvec coef = arma::solve(X, y);
+arma::colvec res = y - X*coef;
+
+double s2 = std::inner_product(res.begin(), res.end(),
+                               res.begin(), double())
+                               / (n - k);
+arma::colvec se = arma::sqrt(s2 * 
+                  arma::diagvec(arma::inv(arma::trans(X) * X)));
+return Rcpp::List::create(Rcpp::Named("coef") = coef,
+                          Rcpp::Named("se") = se,
+                          Rcpp::Named("df") = n - k);
+'
+fun <- cxxfunction(signature(ys="numeric", Xs="numeric"),
+                   src, plugin="RcppArmadillo")
+
+X <- matrix(c(runif(10) * 4, runif(10) * 10), nrow = 10)
+eps <- rnorm(10) 
+beta <- matrix(c(2, 4), nrow = 2)
+y <- X %*% beta + matrix(eps, nrow = 10) * 0.1
+fun(y, X)
+```
+
+### Rcpp Attributes
+
+```{r RcppAttributes}
+library(Rcpp)
+cpptxt <- '
+int fibonacci(const int x) {
+  if (x < 2) return x;
+  return (fibonacci(x - 1) + fibonacci(x - 2));
+}
+'
+fibCpp <- cppFunction(cpptxt)
+```
+
