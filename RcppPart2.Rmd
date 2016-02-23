@@ -207,5 +207,133 @@ fun <- cxxfunction(signature(), src, plugin = "Rcpp")
 fun()
 ```
 
-### Generic vector class / List
+### Generic vector class / List / Dataframe
+
+Data.frame can be seen as a special case of list.
+
+```{r dataframeRcpp}
+src <- '
+Rcpp::IntegerVector v =
+  Rcpp::IntegerVector::create(7, 8, 9);
+std::vector<std::string> s(3);
+s[0] = "x";
+s[1] = "y";
+s[2] = "z";
+return Rcpp::DataFrame::create(
+  Rcpp::Named("a") = v,
+  Rcpp::Named("b") = s);
+'
+
+fun <- cxxfunction(signature(), src, plugin="Rcpp")
+fun()
+```
+
+Need to make sure the data.frame is defined properly in Rcpp (variables are of the same length).
+
+### Function class
+
+
+
+```{r functionClass}
+src <- '
+Function sort(x) ;
+return sort(y, Named("decreasing", true));
+'
+fun <- cxxfunction(signature(x = "function", y = "ANY"), src,
+                   plugin = "Rcpp")
+fun(sort, sample(1:5, 10, TRUE))
+```
+
+Accessing R functions
+
+```{r functionClass2}
+src <- '
+RNGScope scp;
+Rcpp::Function rt("rt");
+return rt(5, 3);
+'
+
+fun <- cxxfunction(signature(), src, plugin="Rcpp")
+set.seed(42)
+fun()
+fun()
+```
+
+### Environment class
+
+```{r environmentClass}
+src <- '
+Rcpp::Environment stats("package:stats");
+Rcpp::Function rnorm = stats["rnorm"];
+return rnorm(10, Rcpp::Named("sd", 100.0));
+'
+
+fun <- cxxfunction(signature(), src, plugin="Rcpp")
+fun()
+```
+
+Create a variable in global environment.
+
+```{r globalEnv}
+src <- '
+Rcpp::Environment global =
+  Rcpp::Environment::global_env();
+std::vector<double> vx = global["x"];
+
+std::map<std::string, std::string> map;
+map["foo"] = "oof";
+map["bar"] = "rab";
+global["y"] = map;
+'
+
+fun <- cxxfunction(signature(), src, plugin = "Rcpp")
+```
+
+### S4 class
+
+```{r s4class}
+f1 <- cxxfunction(signature(x = "any"), plugin="Rcpp", body='
+
+  RObject y(x);
+  List res(3);
+  res[0] = y.isS4();
+  res[1] = y.hasSlot("z");
+  res[2] = y.slot("z");
+  return res;
+                  ')
+f2 <- cxxfunction(signature(x = "any"), plugin="Rcpp", body='
+  S4 foo(x);
+  foo.slot(".Data") = "foooo";
+  return foo;
+                  ')
+```
+
+### R math lib function
+
+```{r mathlib}
+src <- '
+#include <Rcpp.h>
+
+// [[Rcpp::export]]
+
+extern "C" SEXP mypnorm(SEXP xx) {
+  Rcpp::NumericVector x(xx);
+  int n = x.size();
+  Rcpp::NumericVector y1(n), y2(n), y3(n);
+  
+  for (int i=0; i<n; i++) {
+    y1[i] = ::Rf_pnorm5(x[i], 0.0, 1.0, 1, 0);
+    y2[i] = R::pnorm(x[i], 0.0, 1.0, 1, 0);
+  }
+  y3 = Rcpp::pnorm(x);
+  
+  return Rcpp::DataFrame::create(Rcpp::Named("Rf_") = y1,
+                                 Rcpp::Named("R") = y2,
+                                 Rcpp::Named("sugar") = y3);
+}
+'
+
+fun <- cxxfunction(signature(x = "numeric"), src, plugin="Rcpp")
+fun(c(1, 2, 3, 4))
+```
 
