@@ -1,0 +1,20 @@
+---
+title: "Rcpp Part3"
+author: "Wenyu Wang"
+date: "February 24, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Chapter 5. Using Rcpp in your package
+
+```{r mypackage}
+library(Rcpp)
+Rcpp.package.skeleton("mypackage")
+system("ls -lR mypackage")
+system("cat mypackage/src/rcpp_hello_world.cpp")
+```
+
